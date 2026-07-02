@@ -5,20 +5,20 @@ from typing import Union
 
 from document_ast.model.ast_node import AstNode
 
-from ..model.query_ast import ContextQuery, DslQuery, FindQuery
+from ..model.query_ast import Query
 from .query_results import ContextWindowMatch, DslExecutionResult, FindMatch
 
 
 @dataclass(slots=True)
 class ExecuteDslQueryRequest:
-    query: DslQuery
+    query: Query
 
 
 @dataclass(slots=True)
 class EvaluateFindCandidateRequest:
     candidate_index: int
     node: AstNode
-    query: FindQuery
+    query: Query
 
 
 @dataclass(slots=True)
@@ -31,7 +31,7 @@ class FindCandidateEvaluated:
 class EvaluateContextWindowRequest:
     window_index: int
     nodes: list[AstNode]
-    query: ContextQuery
+    query: Query
 
 
 @dataclass(slots=True)

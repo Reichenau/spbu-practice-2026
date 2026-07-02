@@ -5,7 +5,7 @@ from typing import Any
 
 from document_ast.model.ast_node import AstNode
 
-from ..model.query_ast import ContextQuery, DistanceQuery, DistanceReturn, FindQuery, ReturnItem
+from ..model.query_ast import DistanceReturn, Query, ReturnItem
 
 
 def _render_span(start: int, end: int) -> dict[str, int]:
@@ -34,8 +34,15 @@ def _render_return_item(item: ReturnItem) -> str:
     return item
 
 
-def _return_items(items: list[ReturnItem] | None, default: list[ReturnItem]) -> list[ReturnItem]:
-    return list(items or default)
+_DEFAULT_RETURNS: dict[str, list[ReturnItem]] = {
+    "FIND": ["nodes", "count"],
+    "CONTEXT": ["window", "count"],
+    "DISTANCE": ["pairs", "stats", "count"],
+}
+
+
+def _return_items(query: Query) -> list[ReturnItem]:
+    return list(query.returns or _DEFAULT_RETURNS[query.kind])
 
 
 @dataclass(slots=True)
@@ -115,78 +122,52 @@ class DistancePairMatch:
     distance: int
     unit: str
 
-    def render(self) -> dict[str, Any]:
-        return {
+    def render(self, return_items: list[ReturnItem], source_path: str) -> dict[str, Any]:
+        return_names = {_return_name(item) for item in return_items}
+        result: dict[str, Any] = {
             "left": render_compact_node(self.left),
             "right": render_compact_node(self.right),
             "span": _render_span(min(self.left.start, self.right.start), max(self.left.end, self.right.end)),
-            "distance": {
-                "unit": self.unit,
-                "value": self.distance,
-            },
+            "distance": {"unit": self.unit, "value": self.distance},
         }
+        if "source" in return_names:
+            result["source"] = source_path
+        return result
+
+
+QueryMatch = FindMatch | ContextWindowMatch | DistancePairMatch
 
 
 @dataclass(slots=True)
-class FindQueryExecutionResult:
-    query: FindQuery
+class DslQueryExecutionResult:
+    """Единый формат результата исполнения для FIND, CONTEXT и DISTANCE.
+
+    Внутреннее устройство элемента `items` зависит от `query.kind` (узел,
+    окно или пара — это разные сущности с разным набором полей), но
+    конверт результата (`type`, `kind`, `count`, `returns`, `items`,
+    `stats`) один и тот же для всех трёх видов запроса."""
+
+    query: Query
     source_path: str
-    matches: list[FindMatch]
+    matches: list[QueryMatch]
 
     def to_dict(self) -> dict[str, Any]:
-        query_returns = _return_items(self.query.returns, ["nodes", "count"])
+        query_returns = _return_items(self.query)
+        return_names = {_return_name(item) for item in query_returns}
         return_items = [item for item in query_returns if _return_name(item) != "count"]
-        return {
-            "type": "find_query_execution_result",
+        payload: dict[str, Any] = {
+            "type": "dsl_query_execution_result",
+            "kind": self.query.kind.lower(),
             "count": len(self.matches),
             "returns": [_render_return_item(item) for item in query_returns],
             "items": [match.render(return_items, self.source_path) for match in self.matches] if return_items else [],
         }
-
-
-@dataclass(slots=True)
-class ContextQueryExecutionResult:
-    query: ContextQuery
-    source_path: str
-    windows: list[ContextWindowMatch]
-
-    def to_dict(self) -> dict[str, Any]:
-        query_returns = _return_items(self.query.returns, ["window", "count"])
-        return_items = [item for item in query_returns if _return_name(item) != "count"]
-        return {
-            "type": "context_query_execution_result",
-            "count": len(self.windows),
-            "returns": [_render_return_item(item) for item in query_returns],
-            "items": [window.render(return_items, self.source_path) for window in self.windows] if return_items else [],
-        }
-
-
-@dataclass(slots=True)
-class DistanceQueryExecutionResult:
-    query: DistanceQuery
-    source_path: str
-    pairs: list[DistancePairMatch]
-
-    def to_dict(self) -> dict[str, Any]:
-        query_returns = _return_items(self.query.returns, ["pairs", "stats", "count"])
-        return_names = {_return_name(item) for item in query_returns}
-        payload: dict[str, Any] = {
-            "type": "distance_query_execution_result",
-            "count": len(self.pairs),
-            "returns": [_render_return_item(item) for item in query_returns],
-        }
-        if "pairs" in return_names:
-            payload["items"] = [pair.render() for pair in self.pairs]
-        else:
-            payload["items"] = []
         if "stats" in return_names:
             payload["stats"] = self._stats()
-        if "source" in return_names:
-            payload["source"] = self.source_path
         return payload
 
     def _stats(self) -> dict[str, Any]:
-        values = [pair.distance for pair in self.pairs]
+        values = [match.distance for match in self.matches if isinstance(match, DistancePairMatch)]
         if not values:
             return {"count": 0, "mean": None, "variance": None, "min": None, "max": None}
         mean = sum(values) / len(values)
@@ -200,4 +181,4 @@ class DistanceQueryExecutionResult:
         }
 
 
-DslExecutionResult = FindQueryExecutionResult | ContextQueryExecutionResult | DistanceQueryExecutionResult
+DslExecutionResult = DslQueryExecutionResult

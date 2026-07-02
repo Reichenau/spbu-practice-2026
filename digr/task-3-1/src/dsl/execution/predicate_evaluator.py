@@ -8,7 +8,6 @@ from document_ast.model.ast_node import AstNode
 from ..model.query_ast import (
     BinaryExpression,
     ComparisonExpression,
-    ContextQuery,
     CountConstraint,
     DslValue,
     Expression,
@@ -16,6 +15,7 @@ from ..model.query_ast import (
     FunctionExpression,
     NotExpression,
     Pattern,
+    Query,
     RegexLiteral,
     Selector,
     SpanSpec,
@@ -59,13 +59,13 @@ class PredicateEvaluator:
 
     def match_patterns_in_window(
             self,
-            query: ContextQuery,
+            query: Query,
             text: str,
             start: int,
             end: int,
     ) -> list[PatternMatchResult] | None:
         results: list[PatternMatchResult] = []
-        for index, pattern in enumerate(query.patterns, start=1):
+        for index, pattern in enumerate(query.patterns or (), start=1):
             name = pattern.alias or f"pattern_{index}"
             source = pattern.source
             if isinstance(source, str):

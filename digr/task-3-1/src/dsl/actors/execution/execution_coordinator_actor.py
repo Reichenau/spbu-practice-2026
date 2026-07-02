@@ -16,17 +16,10 @@ from ...execution.messages import (
     FindCandidateEvaluated,
 )
 from ...execution.predicate_evaluator import PredicateEvaluator
-from ...execution.query_results import (
-    ContextQueryExecutionResult,
-    ContextWindowMatch,
-    DistanceQueryExecutionResult,
-    FindMatch,
-    FindQueryExecutionResult,
-    render_compact_node,
-)
+from ...execution.query_results import ContextWindowMatch, DslQueryExecutionResult, FindMatch, render_compact_node
 from ...execution.query_validator import QueryValidator
 from ...execution.states import DslExecutionCoordinatorState
-from ...model.query_ast import ContextQuery, DistanceQuery, DistanceReturn, FindQuery
+from ...model.query_ast import DistanceReturn, PairLimit, Query
 
 
 class DslExecutionCoordinatorActor(
@@ -50,8 +43,7 @@ class DslExecutionCoordinatorActor(
         self._pending_count = 0
         self._find_results: dict[int, FindMatch] = {}
         self._context_results: dict[int, ContextWindowMatch] = {}
-        self._current_find_query: FindQuery | None = None
-        self._current_context_query: ContextQuery | None = None
+        self._current_query: Query | None = None
 
     def on_idle_execute_dsl_query_request(self, message: ExecuteDslQueryRequest) -> DslExecutionCoordinatorState:
         try:
@@ -60,11 +52,12 @@ class DslExecutionCoordinatorActor(
             self._collector.tell(DslExecutionFailed(error))
             return DslExecutionCoordinatorState.COMPLETED
 
-        if isinstance(message.query, FindQuery):
-            return self._dispatch_find(message.query)
-        if isinstance(message.query, DistanceQuery):
-            return self._dispatch_distance(message.query)
-        return self._dispatch_context(message.query)
+        query = message.query
+        if query.kind == "FIND":
+            return self._dispatch_find(query)
+        if query.kind == "DISTANCE":
+            return self._dispatch_distance(query)
+        return self._dispatch_context(query)
 
     def on_evaluating_find_candidates_find_candidate_evaluated(
             self, message: FindCandidateEvaluated,
@@ -76,11 +69,11 @@ class DslExecutionCoordinatorActor(
         if self._pending_count > 0:
             return DslExecutionCoordinatorState.EVALUATING_FIND_CANDIDATES
 
-        query = self._current_find_query
+        query = self._current_query
         if query is None:
             raise RuntimeError("find query is not initialized")
         ordered = [self._find_results[index] for index in sorted(self._find_results)]
-        self._collector.tell(DslQueryExecuted(result=FindQueryExecutionResult(
+        self._collector.tell(DslQueryExecuted(result=DslQueryExecutionResult(
             query=query,
             source_path=self._index.document.source_path,
             matches=ordered,
@@ -97,7 +90,7 @@ class DslExecutionCoordinatorActor(
         if self._pending_count > 0:
             return DslExecutionCoordinatorState.EVALUATING_CONTEXT_WINDOWS
 
-        query = self._current_context_query
+        query = self._current_query
         if query is None:
             raise RuntimeError("context query is not initialized")
 
@@ -105,10 +98,10 @@ class DslExecutionCoordinatorActor(
         deduplicated = self._minimal_windows(ordered)
         deduplicated = [self._with_context_distances(match, query) for match in deduplicated]
 
-        self._collector.tell(DslQueryExecuted(result=ContextQueryExecutionResult(
+        self._collector.tell(DslQueryExecuted(result=DslQueryExecutionResult(
             query=query,
             source_path=self._index.document.source_path,
-            windows=deduplicated,
+            matches=deduplicated,
         )))
         return DslExecutionCoordinatorState.COMPLETED
 
@@ -127,14 +120,14 @@ class DslExecutionCoordinatorActor(
     def on_completed(self, message: object) -> DslExecutionCoordinatorState:
         return DslExecutionCoordinatorState.COMPLETED
 
-    def _dispatch_find(self, query: FindQuery) -> DslExecutionCoordinatorState:
-        candidates = self._index.nodes_of_entity(query.entity_name)
-        self._current_find_query = query
+    def _dispatch_find(self, query: Query) -> DslExecutionCoordinatorState:
+        candidates = self._index.nodes_of_entity(query.source.entity_name)
+        self._current_query = query
         self._find_results = {}
         self._pending_count = len(candidates)
 
         if not candidates:
-            self._collector.tell(DslQueryExecuted(result=FindQueryExecutionResult(
+            self._collector.tell(DslQueryExecuted(result=DslQueryExecutionResult(
                 query=query,
                 source_path=self._index.document.source_path,
                 matches=[],
@@ -147,21 +140,21 @@ class DslExecutionCoordinatorActor(
 
         return DslExecutionCoordinatorState.EVALUATING_FIND_CANDIDATES
 
-    def _dispatch_context(self, query: ContextQuery) -> DslExecutionCoordinatorState:
-        base_nodes = self._index.nodes_of_entity(query.span.entity_name)
-        self._current_context_query = query
+    def _dispatch_context(self, query: Query) -> DslExecutionCoordinatorState:
+        base_nodes = self._index.nodes_of_entity(query.source.entity_name)
+        self._current_query = query
         self._context_results = {}
         self._pending_count = len(base_nodes)
 
         if not base_nodes:
-            self._collector.tell(DslQueryExecuted(result=ContextQueryExecutionResult(
+            self._collector.tell(DslQueryExecuted(result=DslQueryExecutionResult(
                 query=query,
                 source_path=self._index.document.source_path,
-                windows=[],
+                matches=[],
             )))
             return DslExecutionCoordinatorState.COMPLETED
 
-        max_window_length = self._resolve_max_window_length(query.span.constraint.operator, query.span.constraint.value)
+        max_window_length = self._resolve_max_window_length(query.window.operator, query.window.value)
         for index in range(len(base_nodes)):
             nodes = base_nodes[index:]
             if max_window_length is not None:
@@ -171,26 +164,26 @@ class DslExecutionCoordinatorActor(
 
         return DslExecutionCoordinatorState.EVALUATING_CONTEXT_WINDOWS
 
-    def _dispatch_distance(self, query: DistanceQuery) -> DslExecutionCoordinatorState:
+    def _dispatch_distance(self, query: Query) -> DslExecutionCoordinatorState:
         try:
             distance_return = self._distance_calculator.distance_return(query.returns)
             pairs = self._distance_calculator.calculate_pairs(
-                query.left,
-                query.right,
+                query.source,
+                query.target,
                 query.within,
-                query.limit_pairs,
+                query.limit or PairLimit(mode="nearest"),
                 distance_return.entity_name,
             )
-            self._collector.tell(DslQueryExecuted(result=DistanceQueryExecutionResult(
+            self._collector.tell(DslQueryExecuted(result=DslQueryExecutionResult(
                 query=query,
                 source_path=self._index.document.source_path,
-                pairs=pairs,
+                matches=pairs,
             )))
         except Exception as error:
             self._collector.tell(DslExecutionFailed(error))
         return DslExecutionCoordinatorState.COMPLETED
 
-    def _with_context_distances(self, match: ContextWindowMatch, query: ContextQuery) -> ContextWindowMatch:
+    def _with_context_distances(self, match: ContextWindowMatch, query: Query) -> ContextWindowMatch:
         distance_returns = [item for item in query.returns or () if isinstance(item, DistanceReturn)]
         if not distance_returns:
             return match

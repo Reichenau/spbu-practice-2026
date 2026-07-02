@@ -1,13 +1,6 @@
-from .query_results import (
-    ContextQueryExecutionResult,
-    DistanceQueryExecutionResult,
-    DslExecutionResult,
-    FindQueryExecutionResult,
-)
+from .query_results import DslExecutionResult, DslQueryExecutionResult
 
 __all__ = [
-    "ContextQueryExecutionResult",
-    "DistanceQueryExecutionResult",
     "DslExecutionResult",
-    "FindQueryExecutionResult",
+    "DslQueryExecutionResult",
 ]

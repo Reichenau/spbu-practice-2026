@@ -3,25 +3,26 @@ from __future__ import annotations
 from ..model.query_ast import (
     BinaryExpression,
     ComparisonExpression,
-    ContextQuery,
-    DistanceQuery,
     DistanceReturn,
-    DslQuery,
     Expression,
     FieldRef,
-    FindQuery,
     FunctionExpression,
     NotExpression,
     Pattern,
+    Query,
     Selector,
     SpanSpec,
-    WithinConstraint,
 )
 from .document_index import DocumentIndex
 
 
 class QueryValidator:
-    def validate(self, query: DslQuery, index: DocumentIndex) -> None:
+    """Проверяет запрос после разбора: имена сущностей и уместность полей
+    общего <хвоста запроса> (WITHIN/WHERE/LIMIT_PAIRS/RETURN) для конкретного
+    `query.kind` — грамматика их синтаксически разрешает всем трём видам
+    запроса одинаково, семантическую уместность проверяет этот класс."""
+
+    def validate(self, query: Query, index: DocumentIndex) -> None:
         known_entities = index.entities() | {"symbol"}
         missing_entities = sorted(self._collect_entities(query) - known_entities)
         if missing_entities:
@@ -29,39 +30,47 @@ class QueryValidator:
                 "Query references unknown AST entities: "
                 + ", ".join(missing_entities)
             )
+        self._validate_kind_specific_fields(query)
 
-    def _collect_entities(self, query: DslQuery) -> set[str]:
-        items: set[str] = set()
-        if isinstance(query, ContextQuery):
-            items.add(query.span.entity_name)
-            for pattern in query.patterns:
-                items.update(self._collect_pattern_entities(pattern))
-            for within in query.within:
-                items.add(within.entity_name)
-            for item in query.returns or ():
-                if isinstance(item, DistanceReturn):
-                    items.add(item.entity_name)
-            if query.where is not None:
-                items.update(self._collect_expression_entities(query.where))
-            return items
+    def _validate_kind_specific_fields(self, query: Query) -> None:
+        distance_returns = [item for item in query.returns or () if isinstance(item, DistanceReturn)]
 
-        if isinstance(query, DistanceQuery):
-            items.update(self._collect_selector_entities(query.left))
-            items.update(self._collect_selector_entities(query.right))
-            for within in query.within:
-                items.add(within.entity_name)
-            distance_returns = [item for item in query.returns or () if isinstance(item, DistanceReturn)]
+        if query.kind == "DISTANCE":
+            if query.target is None:
+                raise ValueError("DISTANCE query requires a TO selector")
             if len(distance_returns) != 1:
                 raise ValueError("DISTANCE query requires exactly one RETURN distance(entity) item")
-            for item in distance_returns:
-                items.add(item.entity_name)
-            return items
+            return
 
-        items.add(query.entity_name)
-        for within in query.within or ():
+        if query.limit is not None:
+            raise ValueError(f"LIMIT_PAIRS is only meaningful for DISTANCE, not {query.kind}")
+
+        if query.kind == "CONTEXT":
+            if not query.patterns:
+                raise ValueError("CONTEXT query must have at least one FOR pattern")
+            if query.window is None:
+                raise ValueError("CONTEXT query must specify a window length constraint")
+            return
+
+        # FIND
+        if distance_returns:
+            raise ValueError("RETURN distance(entity) is only meaningful for CONTEXT and DISTANCE, not FIND")
+
+    def _collect_entities(self, query: Query) -> set[str]:
+        items: set[str] = {query.source.entity_name}
+        if query.source.predicate is not None:
+            items.update(self._collect_expression_entities(query.source.predicate))
+        if query.target is not None:
+            items.update(self._collect_selector_entities(query.target))
+        for pattern in query.patterns or ():
+            items.update(self._collect_pattern_entities(pattern))
+        for within in query.within:
             items.add(within.entity_name)
         if query.where is not None:
             items.update(self._collect_expression_entities(query.where))
+        for item in query.returns or ():
+            if isinstance(item, DistanceReturn):
+                items.add(item.entity_name)
         return items
 
     def _collect_pattern_entities(self, pattern: Pattern) -> set[str]:
