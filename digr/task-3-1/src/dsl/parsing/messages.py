@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Union
 
-from ..model.query_ast import DslQuery
+from ..model.query_ast import Query
 from .token import DslToken
 
 
@@ -33,33 +33,18 @@ class ContinueQueryClassification:
 
 
 @dataclass(slots=True)
-class ContinueContextSpanParsing:
+class ContinueHeadParsing:
     pass
 
 
 @dataclass(slots=True)
-class ContinueContextPatternParsing:
-    pass
-
-
-@dataclass(slots=True)
-class ContinueContextConstraintParsing:
-    pass
-
-
-@dataclass(slots=True)
-class ContinueFindTargetParsing:
-    pass
-
-
-@dataclass(slots=True)
-class ContinueFindConstraintParsing:
+class ContinueTailParsing:
     pass
 
 
 @dataclass(slots=True)
 class DslQueryParsed:
-    query: DslQuery
+    query: Query
 
 
 @dataclass(slots=True)
@@ -79,11 +64,8 @@ LexerMessage = Union[TokenizeDslRequest]
 QueryParserMessage = Union[
     ParseTokenStreamRequest,
     ContinueQueryClassification,
-    ContinueContextSpanParsing,
-    ContinueContextPatternParsing,
-    ContinueContextConstraintParsing,
-    ContinueFindTargetParsing,
-    ContinueFindConstraintParsing,
+    ContinueHeadParsing,
+    ContinueTailParsing,
 ]
 
 CollectorMessage = Union[DslQueryParsed, DslParseFailed]

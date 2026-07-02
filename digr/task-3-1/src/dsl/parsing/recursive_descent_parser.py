@@ -3,19 +3,16 @@ from __future__ import annotations
 from ..model.query_ast import (
     BinaryExpression,
     ComparisonExpression,
-    ContextQuery,
     CountConstraint,
-    DistanceQuery,
     DistanceReturn,
-    DslQuery,
     DslValue,
     Expression,
     FieldRef,
-    FindQuery,
     FunctionExpression,
     NotExpression,
     PairLimit,
     Pattern,
+    Query,
     RegexLiteral,
     ReturnItem,
     Selector,
@@ -43,6 +40,15 @@ _COMPARISON_OPERATOR_KINDS = {
 
 
 class DslTokenStreamParser:
+    """Разбор запроса по единой грамматике: <заголовок>, зависящий от
+    ключевого слова (CONTEXT/FIND/DISTANCE), и общий для всех трёх
+    <хвост запроса> = WITHIN* WHERE? LIMIT_PAIRS? RETURN?.
+
+    Семантическая уместность полей хвоста для конкретного kind (например,
+    LIMIT_PAIRS вне DISTANCE) грамматикой не ограничивается и проверяется
+    отдельно в QueryValidator — так же, как имена сущностей.
+    """
+
     def __init__(self, tokens: list[DslToken]) -> None:
         self._tokens = tokens
         self._index = 0
@@ -73,78 +79,54 @@ class DslTokenStreamParser:
             raise self._error(message)
         return self.advance()
 
-    def parse_query(self) -> DslQuery:
-        if self.current.kind is TokenKind.CONTEXT:
-            query = self.parse_context_query()
-        elif self.current.kind is TokenKind.FIND:
-            query = self.parse_find_query()
-        elif self.current.kind is TokenKind.DISTANCE:
-            query = self.parse_distance_query()
-        else:
-            raise self._error("Query must start with CONTEXT, FIND, or DISTANCE")
+    # -------------------- <Запрос> --------------------
+    def parse_query(self) -> Query:
+        query = self.parse_query_head()
+        self.parse_query_tail(query)
         self.consume_query_terminator()
         self.expect(TokenKind.EOF, "Unexpected tokens after end of query")
         return query
 
-    def parse_context_prefix(self) -> SpanSpec:
+    def parse_query_head(self) -> Query:
+        if self.current.kind is TokenKind.CONTEXT:
+            return self.parse_context_head()
+        if self.current.kind is TokenKind.FIND:
+            return self.parse_find_head()
+        if self.current.kind is TokenKind.DISTANCE:
+            return self.parse_distance_head()
+        raise self._error("Query must start with CONTEXT, FIND, or DISTANCE")
+
+    # -------------------- Заголовки, специфичные для kind --------------------
+    def parse_context_head(self) -> Query:
         self.expect(TokenKind.CONTEXT, "Expected CONTEXT")
         span = self.parse_span_spec()
         self.expect(TokenKind.FOR, "Expected FOR after context span")
-        return span
-
-    def parse_find_prefix(self) -> str:
-        self.expect(TokenKind.FIND, "Expected FIND")
-        return self.parse_identifier("Expected entity name after FIND")
-
-    def parse_context_query(self) -> ContextQuery:
-        span = self.parse_context_prefix()
         patterns = self.parse_pattern_list()
-        within = self.parse_within_clauses()
-        where = self.parse_where_clause()
-        returns = self.parse_return_clause()
-        return ContextQuery(span=span, patterns=patterns, within=within, where=where, returns=returns)
+        return Query(
+            kind="CONTEXT",
+            source=Selector(entity_name=span.entity_name),
+            window=span.constraint,
+            patterns=patterns,
+        )
 
-    def parse_find_query(self) -> FindQuery:
-        entity_name = self.parse_find_prefix()
-        where = self.parse_where_clause()
-        within = self.parse_within_clauses()
-        returns = self.parse_return_clause()
-        return FindQuery(entity_name=entity_name, where=where, within=within, returns=returns)
+    def parse_find_head(self) -> Query:
+        self.expect(TokenKind.FIND, "Expected FIND")
+        entity_name = self.parse_identifier("Expected entity name after FIND")
+        return Query(kind="FIND", source=Selector(entity_name=entity_name))
 
-    def parse_distance_query(self) -> DistanceQuery:
+    def parse_distance_head(self) -> Query:
         self.expect(TokenKind.DISTANCE, "Expected DISTANCE")
         left = self.parse_selector()
         self.expect(TokenKind.TO, "Expected TO after left distance selector")
         right = self.parse_selector()
-        within = self.parse_within_clauses()
-        limit_pairs = self.parse_limit_pairs_clause()
-        returns = self.parse_return_clause()
-        return DistanceQuery(
-            left=left,
-            right=right,
-            within=within,
-            limit_pairs=limit_pairs,
-            returns=returns,
-        )
+        return Query(kind="DISTANCE", source=left, target=right)
 
-    def parse_context_constraints(self) -> tuple[list[WithinConstraint], Expression | None, list[ReturnItem]]:
-        within = self.parse_within_clauses()
-        where = self.parse_where_clause()
-        returns = self.parse_return_clause()
-        self.consume_query_terminator()
-        self.expect(TokenKind.EOF, "Unexpected tokens after end of CONTEXT query")
-        return within, where, returns
-
-    def parse_find_constraints(self) -> tuple[Expression | None, list[WithinConstraint], list[ReturnItem]]:
-        where = self.parse_where_clause()
-        within = self.parse_within_clauses()
-        returns = self.parse_return_clause()
-        self.consume_query_terminator()
-        self.expect(TokenKind.EOF, "Unexpected tokens after end of FIND query")
-        return where, within, returns
-
-    def consume_query_terminator(self) -> None:
-        self.match(TokenKind.SEMICOLON)
+    # -------------------- Общий <хвост запроса> --------------------
+    def parse_query_tail(self, query: Query) -> None:
+        query.within = self.parse_within_clauses()
+        query.where = self.parse_where_clause()
+        query.limit = self.parse_limit_pairs_clause()
+        query.returns = self.parse_return_clause()
 
     def parse_within_clauses(self) -> list[WithinConstraint]:
         items: list[WithinConstraint] = []
@@ -156,14 +138,14 @@ class DslTokenStreamParser:
             items.append(WithinConstraint(entity_name=entity_name, constraint=constraint))
         return items
 
-    def parse_where_clause(self):
+    def parse_where_clause(self) -> Expression | None:
         if not self.match(TokenKind.WHERE):
             return None
         return self.parse_boolean_expression()
 
-    def parse_limit_pairs_clause(self) -> PairLimit:
+    def parse_limit_pairs_clause(self) -> PairLimit | None:
         if not self.match(TokenKind.LIMIT_PAIRS):
-            return PairLimit(mode="nearest")
+            return None
         if self.current.kind is TokenKind.INTEGER:
             value = self.advance().value
             if value <= 0:
@@ -193,6 +175,10 @@ class DslTokenStreamParser:
             return DistanceReturn(entity_name=entity_name)
         return name
 
+    def consume_query_terminator(self) -> None:
+        self.match(TokenKind.SEMICOLON)
+
+    # -------------------- Паттерны CONTEXT --------------------
     def parse_pattern_list(self) -> list[Pattern]:
         items = [self.parse_pattern()]
         while self.match(TokenKind.COMMA):
@@ -212,6 +198,7 @@ class DslTokenStreamParser:
             return Pattern(source=self.parse_regex_literal(), alias=alias)
         return Pattern(source=self.parse_selector(), alias=alias)
 
+    # -------------------- Общие продукции --------------------
     def parse_span_spec(self) -> SpanSpec:
         entity_name = self.parse_identifier("Expected entity name")
         self.expect(TokenKind.LBRACKET, "Expected '[' after entity name")
@@ -228,29 +215,29 @@ class DslTokenStreamParser:
         integer_token = self.expect(TokenKind.INTEGER, "Expected integer after count operator")
         return CountConstraint(operator=operator, value=integer_token.value)
 
-    def parse_boolean_expression(self):
+    def parse_boolean_expression(self) -> Expression:
         return self.parse_disjunction()
 
-    def parse_disjunction(self):
+    def parse_disjunction(self) -> Expression:
         expression = self.parse_conjunction()
         while self.match(TokenKind.OR):
             right = self.parse_conjunction()
             expression = BinaryExpression(operator="OR", left=expression, right=right)
         return expression
 
-    def parse_conjunction(self):
+    def parse_conjunction(self) -> Expression:
         expression = self.parse_negation()
         while self.match(TokenKind.AND):
             right = self.parse_negation()
             expression = BinaryExpression(operator="AND", left=expression, right=right)
         return expression
 
-    def parse_negation(self):
+    def parse_negation(self) -> Expression:
         if self.match(TokenKind.NOT):
             return NotExpression(operand=self.parse_negation())
         return self.parse_predicate()
 
-    def parse_predicate(self):
+    def parse_predicate(self) -> Expression:
         if self.match(TokenKind.LPAREN):
             expression = self.parse_boolean_expression()
             self.expect(TokenKind.RPAREN, "Expected ')' after grouped expression")

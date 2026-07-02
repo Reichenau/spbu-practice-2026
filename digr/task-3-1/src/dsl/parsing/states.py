@@ -13,11 +13,8 @@ class DslCoordinatorState(Enum):
 class DslQueryParserState(Enum):
     READY = auto()
     CLASSIFYING_QUERY = auto()
-    PARSING_CONTEXT_SPAN = auto()
-    PARSING_CONTEXT_PATTERNS = auto()
-    PARSING_CONTEXT_CONSTRAINTS = auto()
-    PARSING_FIND_TARGET = auto()
-    PARSING_FIND_CONSTRAINTS = auto()
+    PARSING_HEAD = auto()
+    PARSING_TAIL = auto()
 
 
 class DslWorkerState(Enum):
