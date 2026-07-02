@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, TypeAlias
 
 
@@ -128,29 +128,28 @@ Expression: TypeAlias = ComparisonExpression | FunctionExpression | NotExpressio
 
 
 @dataclass(slots=True)
-class ContextQuery(Serializable):
-    span: SpanSpec
-    patterns: list[Pattern]
-    within: list[WithinConstraint]
+class Query(Serializable):
+    """Единый узел верхнего уровня для запросов FIND, CONTEXT и DISTANCE.
+
+    Поля, релевантные только части запросов, для остальных остаются
+    неиспользуемыми (см. таблицу соответствия в docs/dsl_grammar.rbnf):
+      - `target`   заполняется только для DISTANCE (правый селектор);
+      - `window`   заполняется только для CONTEXT (ограничение длины окна);
+      - `patterns` заполняется только для CONTEXT (список FOR-паттернов);
+      - `limit`    заполняется только для DISTANCE (LIMIT_PAIRS).
+    Для CONTEXT предикат `source.predicate` всегда `None`: скобки после
+    базовой сущности CONTEXT задают не логическое условие, а `window`.
+    """
+
+    kind: str
+    source: Selector
+    target: Selector | None = None
+    window: CountConstraint | None = None
+    patterns: list[Pattern] | None = None
+    within: list[WithinConstraint] = field(default_factory=list)
     where: Expression | None = None
+    limit: PairLimit | None = None
     returns: list[ReturnItem] | None = None
 
 
-@dataclass(slots=True)
-class FindQuery(Serializable):
-    entity_name: str
-    where: Expression | None = None
-    within: list[WithinConstraint] | None = None
-    returns: list[ReturnItem] | None = None
-
-
-@dataclass(slots=True)
-class DistanceQuery(Serializable):
-    left: Selector
-    right: Selector
-    within: list[WithinConstraint]
-    limit_pairs: PairLimit
-    returns: list[ReturnItem] | None = None
-
-
-DslQuery: TypeAlias = ContextQuery | FindQuery | DistanceQuery
+DslQuery: TypeAlias = Query
