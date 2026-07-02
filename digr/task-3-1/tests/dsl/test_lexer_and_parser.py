@@ -4,12 +4,10 @@ import pytest
 
 from dsl import (
     ActorDslParser,
-    DistanceQuery,
     DistanceReturn,
     DslLexer,
     DslSyntaxError,
     DslTokenStreamParser,
-    FindQuery,
     SpanSpec,
     TokenKind,
 )
@@ -58,20 +56,25 @@ def test_dsl_parser_builds_context_query_with_aliases_and_returns() -> None:
     query = DslTokenStreamParser(DslLexer().tokenize(source)).parse_query()
     payload = query.to_dict()
 
-    assert payload["type"] == "context_query"
-    assert payload["span"]["entity_name"] == "sentence"
+    assert payload["type"] == "query"
+    assert payload["kind"] == "CONTEXT"
+    assert payload["source"]["entity_name"] == "sentence"
     assert [pattern["alias"] for pattern in payload["patterns"]] == ["door", "quiet", "hit"]
     assert payload["within"][0]["entity_name"] == "paragraph"
     assert payload["returns"] == ["text", "matches", "count"]
 
 
-def test_dsl_parser_builds_find_query() -> None:
+def test_dsl_parser_builds_find_query_with_within_before_where() -> None:
+    # Единая грамматика фиксирует порядок хвоста WITHIN* WHERE? LIMIT_PAIRS? RETURN?
+    # для всех трёх видов запроса — в исходной грамматике FIND требовал обратный
+    # порядок (WHERE перед WITHIN), см. отчёт, п. "Нормализация порядка хвоста".
     query = DslTokenStreamParser(
-        DslLexer().tokenize('FIND sentence WHERE text ~= /тишина/i RETURN text')
+        DslLexer().tokenize('FIND sentence WITHIN paragraph[<=2] WHERE text ~= /тишина/i RETURN text')
     ).parse_query()
 
-    assert isinstance(query, FindQuery)
-    assert query.entity_name == "sentence"
+    assert query.kind == "FIND"
+    assert query.source.entity_name == "sentence"
+    assert query.within[0].entity_name == "paragraph"
     assert query.returns == ["text"]
 
 
@@ -86,11 +89,11 @@ def test_dsl_parser_builds_distance_query() -> None:
 
     query = DslTokenStreamParser(DslLexer().tokenize(source)).parse_query()
 
-    assert isinstance(query, DistanceQuery)
-    assert query.left.entity_name == "semantic_block"
-    assert query.right.entity_name == "semantic_block"
+    assert query.kind == "DISTANCE"
+    assert query.source.entity_name == "semantic_block"
+    assert query.target.entity_name == "semantic_block"
     assert query.within[0].entity_name == "content_scope"
-    assert query.limit_pairs.mode == "all_nearest"
+    assert query.limit.mode == "all_nearest"
     assert isinstance(query.returns[2], DistanceReturn)
     assert query.returns[2].entity_name == "word"
 
@@ -100,9 +103,9 @@ def test_dsl_parser_builds_distance_query_with_integer_limit() -> None:
         "DISTANCE sentence[text ~= /телефон/i] TO sentence[text ~= /тишина/i] LIMIT_PAIRS 3 RETURN distance(word)"
     )
 
-    assert isinstance(query, DistanceQuery)
-    assert query.limit_pairs.mode == "k"
-    assert query.limit_pairs.value == 3
+    assert query.kind == "DISTANCE"
+    assert query.limit.mode == "k"
+    assert query.limit.value == 3
 
 
 def test_dsl_parser_treats_bracketed_argument_as_span_spec() -> None:
@@ -112,6 +115,18 @@ def test_dsl_parser_treats_bracketed_argument_as_span_spec() -> None:
 
     assert isinstance(query.where.arguments[0], SpanSpec)
     assert query.where.arguments[0].entity_name == "word"
+
+
+def test_dsl_parser_accepts_limit_pairs_syntax_for_any_kind() -> None:
+    # Общая грамматика хвоста разрешает LIMIT_PAIRS синтаксически для любого kind;
+    # уместность по смыслу (только DISTANCE) проверяет QueryValidator, а не парсер —
+    # см. test_query_validator_rejects_limit_pairs_outside_distance.
+    query = DslTokenStreamParser(
+        DslLexer().tokenize("FIND sentence LIMIT_PAIRS all RETURN text")
+    ).parse_query()
+
+    assert query.kind == "FIND"
+    assert query.limit.mode == "all"
 
 
 def test_actor_dsl_parser_surfaces_syntax_errors() -> None:

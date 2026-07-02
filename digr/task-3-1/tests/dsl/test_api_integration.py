@@ -16,11 +16,44 @@ def test_actor_dsl_parser_and_executor_find_phone(sample_document) -> None:
 
     payload = ActorDslExecutor().execute(sample_document, query).to_dict()
 
+    assert payload["type"] == "dsl_query_execution_result"
+    assert payload["kind"] == "find"
     assert payload["count"] == 2
     assert [item["text"] for item in payload["items"]] == [
         "В девять часов телефон наконец завибрировал.",
         "Телефон снова завибрировал.",
     ]
+
+
+def test_actor_dsl_engine_enforces_within_for_find(dsl_engine, sample_document) -> None:
+    # "word" не является предком "sentence" в иерархии document_ast
+    # (document -> page -> paragraph -> sentence -> clause -> word), поэтому
+    # ни одно предложение не может лежать "внутри ровно одного word".
+    payload = dsl_engine.execute(
+        sample_document,
+        """
+        FIND sentence
+        WITHIN word[=1]
+        WHERE has_descendant(word[text ~= /телефон/i])
+        RETURN text, count
+        """.strip(),
+    ).to_dict()
+
+    assert payload["count"] == 0
+
+
+def test_actor_dsl_engine_find_within_paragraph_keeps_matching_candidates(dsl_engine, sample_document) -> None:
+    payload = dsl_engine.execute(
+        sample_document,
+        """
+        FIND sentence
+        WITHIN paragraph[=1]
+        WHERE has_descendant(word[text ~= /телефон/i])
+        RETURN text, count
+        """.strip(),
+    ).to_dict()
+
+    assert payload["count"] == 2
 
 
 def test_actor_dsl_engine_executes_context_query(dsl_engine, sample_document) -> None:
@@ -34,7 +67,8 @@ def test_actor_dsl_engine_executes_context_query(dsl_engine, sample_document) ->
         """.strip(),
     ).to_dict()
 
-    assert payload["type"] == "context_query_execution_result"
+    assert payload["type"] == "dsl_query_execution_result"
+    assert payload["kind"] == "context"
     assert payload["count"] == 1
     assert "Только тишина." in payload["items"][0]["text"]
     assert [match["matched_text"] for match in payload["items"][0]["matches"]] == ["дверь", "тишина"]
@@ -52,7 +86,8 @@ def test_actor_dsl_engine_executes_distance_query(dsl_engine, sample_document) -
         """.strip(),
     ).to_dict()
 
-    assert payload["type"] == "distance_query_execution_result"
+    assert payload["type"] == "dsl_query_execution_result"
+    assert payload["kind"] == "distance"
     assert payload["count"] == 1
     assert payload["items"][0]["distance"] == {"unit": "word", "value": 0}
     assert "children" not in payload["items"][0]["left"]

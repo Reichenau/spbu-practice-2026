@@ -172,7 +172,8 @@ def test_docs_distance_examples(
 ) -> None:
     payload = execute(tex_engine, ga_tex_document, query)
 
-    assert payload["type"] == "distance_query_execution_result"
+    assert payload["type"] == "dsl_query_execution_result"
+    assert payload["kind"] == "distance"
     assert payload["count"] == expected_count
     assert payload["stats"] == pytest.approx(expected_stats)
     assert payload["items"][0]["distance"]["unit"] == expected_unit
@@ -246,7 +247,8 @@ def test_docs_context_distance_examples(
     first = payload["items"][0]
     distance = first["distances"][0]
 
-    assert payload["type"] == "context_query_execution_result"
+    assert payload["type"] == "dsl_query_execution_result"
+    assert payload["kind"] == "context"
     assert payload["count"] == expected_count
     assert [match["name"] for match in first["matches"]] == expected_names
     assert distance["distance"] == {"unit": expected_unit, "value": expected_value}

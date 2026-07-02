@@ -79,7 +79,8 @@ def test_tex_dsl_measures_distance_between_theorem_and_proof(ga_tex_document) ->
         """.strip(),
     ).to_dict()
 
-    assert payload["type"] == "distance_query_execution_result"
+    assert payload["type"] == "dsl_query_execution_result"
+    assert payload["kind"] == "distance"
     assert payload["count"] >= 1
     assert payload["items"][0]["distance"]["unit"] == "semantic_block"
     assert payload["items"][0]["distance"]["value"] == 0
@@ -99,7 +100,8 @@ def test_tex_dsl_measures_symbol_distance_between_definition_and_theorem(ga_tex_
         """.strip(),
     ).to_dict()
 
-    assert payload["type"] == "distance_query_execution_result"
+    assert payload["type"] == "dsl_query_execution_result"
+    assert payload["kind"] == "distance"
     assert payload["count"] == 1
     assert payload["items"][0]["distance"]["unit"] == "symbol"
     assert payload["items"][0]["distance"]["value"] == 344

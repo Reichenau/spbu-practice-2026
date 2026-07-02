@@ -7,22 +7,20 @@ from dsl.actors.execution.execution_coordinator_actor import DslExecutionCoordin
 from dsl.execution.document_index import DocumentIndex
 from dsl.execution.predicate_evaluator import PredicateEvaluator
 from dsl.execution.query_results import (
-    ContextQueryExecutionResult,
     ContextWindowMatch,
+    DslQueryExecutionResult,
     FindMatch,
-    FindQueryExecutionResult,
     PatternMatchResult,
 )
 from dsl.execution.query_validator import QueryValidator
 from dsl.model.query_ast import (
     BinaryExpression,
     ComparisonExpression,
-    ContextQuery,
     CountConstraint,
     FieldRef,
-    FindQuery,
     FunctionExpression,
     Pattern,
+    Query,
     RegexLiteral,
     Selector,
     SpanSpec,
@@ -53,16 +51,19 @@ def test_document_index_navigates_tree(sample_document) -> None:
 
 def test_query_validator_accepts_valid_query_and_rejects_unknown_entities(document_index) -> None:
     validator = QueryValidator()
-    valid = FindQuery(
-        entity_name="sentence",
+    valid = Query(
+        kind="FIND",
+        source=Selector("sentence"),
         where=FunctionExpression("has_descendant", [Selector("word")]),
         within=[],
         returns=["text"],
     )
     validator.validate(valid, document_index)
 
-    invalid = ContextQuery(
-        span=SpanSpec("sentence", CountConstraint("<=", 2)),
+    invalid = Query(
+        kind="CONTEXT",
+        source=Selector("sentence"),
+        window=CountConstraint("<=", 2),
         patterns=[Pattern(source=Selector("ghost"))],
         within=[],
         returns=["text"],
@@ -70,6 +71,24 @@ def test_query_validator_accepts_valid_query_and_rejects_unknown_entities(docume
 
     with pytest.raises(ValueError, match="ghost"):
         validator.validate(invalid, document_index)
+
+
+def test_query_validator_rejects_limit_pairs_outside_distance(document_index) -> None:
+    from dsl.model.query_ast import PairLimit
+
+    query = Query(kind="FIND", source=Selector("sentence"), limit=PairLimit(mode="all"), returns=["text"])
+
+    with pytest.raises(ValueError, match="LIMIT_PAIRS"):
+        QueryValidator().validate(query, document_index)
+
+
+def test_query_validator_rejects_return_distance_for_find(document_index) -> None:
+    from dsl.model.query_ast import DistanceReturn
+
+    query = Query(kind="FIND", source=Selector("sentence"), returns=[DistanceReturn(entity_name="word")])
+
+    with pytest.raises(ValueError, match="RETURN distance"):
+        QueryValidator().validate(query, document_index)
 
 
 def test_predicate_evaluator_supports_core_functions(document_index) -> None:
@@ -125,8 +144,10 @@ def test_predicate_evaluator_supports_core_functions(document_index) -> None:
 def test_predicate_evaluator_matches_patterns_and_counts_containers(document_index) -> None:
     evaluator = PredicateEvaluator(document_index)
     paragraph = find_node(document_index, "paragraph", "Однако мысли всё время")
-    query = ContextQuery(
-        span=SpanSpec("sentence", CountConstraint("<=", 4)),
+    query = Query(
+        kind="CONTEXT",
+        source=Selector("sentence"),
+        window=CountConstraint("<=", 4),
         patterns=[
             Pattern(source="дверь"),
             Pattern(source=RegexLiteral("тишина", "i"), alias="quiet"),
@@ -183,17 +204,20 @@ def test_predicate_evaluator_reports_error_branches(document_index) -> None:
 
 def test_query_ast_and_execution_results_serialize(document_index) -> None:
     sentence = find_node(document_index, "sentence", "телефон наконец")
-    query = FindQuery(entity_name="sentence", returns=None)
-    result = FindQueryExecutionResult(query=query, source_path="text.txt", matches=[FindMatch(sentence)])
-    payload = result.to_dict()
+    find_query = Query(kind="FIND", source=Selector("sentence"), returns=None)
+    find_result = DslQueryExecutionResult(query=find_query, source_path="text.txt", matches=[FindMatch(sentence)])
+    find_payload = find_result.to_dict()
 
-    assert payload["type"] == "find_query_execution_result"
-    assert payload["count"] == 1
-    assert payload["returns"] == ["nodes", "count"]
-    assert payload["items"][0]["nodes"]["entity"] == "sentence"
+    assert find_payload["type"] == "dsl_query_execution_result"
+    assert find_payload["kind"] == "find"
+    assert find_payload["count"] == 1
+    assert find_payload["returns"] == ["nodes", "count"]
+    assert find_payload["items"][0]["nodes"]["entity"] == "sentence"
 
-    context_query = ContextQuery(
-        span=SpanSpec("sentence", CountConstraint("<=", 2)),
+    context_query = Query(
+        kind="CONTEXT",
+        source=Selector("sentence"),
+        window=CountConstraint("<=", 2),
         patterns=[Pattern(source="телефон")],
         within=[],
         returns=None,
@@ -206,13 +230,15 @@ def test_query_ast_and_execution_results_serialize(document_index) -> None:
         end=sentence.end,
         matches=[PatternMatchResult(name="pattern_1", source_type="string", matched_text="телефон")],
     )
-    context_payload = ContextQueryExecutionResult(
+    context_payload = DslQueryExecutionResult(
         query=context_query,
         source_path="text.txt",
-        windows=[window],
+        matches=[window],
     ).to_dict()
 
-    assert context_query.to_dict()["type"] == "context_query"
+    assert context_query.to_dict()["type"] == "query"
+    assert context_query.to_dict()["kind"] == "CONTEXT"
+    assert context_payload["kind"] == "context"
     assert context_payload["returns"] == ["window", "count"]
     assert context_payload["items"][0]["window"]["base_entity"] == "sentence"
 
