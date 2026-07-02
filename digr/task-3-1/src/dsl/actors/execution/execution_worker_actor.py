@@ -38,10 +38,14 @@ class DslExecutionWorkerActor(Actor[DslExecutionWorkerState, ExecutionWorkerMess
             raise RuntimeError("reply_to handle is not configured")
         try:
             query = message.query
-            matched = query.where is None or self._evaluator.evaluate(message.node, query.where)
+            node = message.node
+            matched = (
+                self._within_constraints_satisfied([node], query)
+                and (query.where is None or self._evaluator.evaluate(node, query.where))
+            )
             self._reply_to.tell(FindCandidateEvaluated(
                 candidate_index=message.candidate_index,
-                match=FindMatch(node=message.node) if matched else None,
+                match=FindMatch(node=node) if matched else None,
             ))
         except Exception as error:
             self._reply_to.tell(DslExecutionFailed(error))
@@ -65,7 +69,7 @@ class DslExecutionWorkerActor(Actor[DslExecutionWorkerState, ExecutionWorkerMess
             query,
     ) -> ContextWindowMatch | None:
         for size in range(1, len(candidates) + 1):
-            if not self._evaluator.compare_count(size, query.span.constraint):
+            if not self._evaluator.compare_count(size, query.window):
                 continue
 
             nodes = candidates[:size]
@@ -86,13 +90,13 @@ class DslExecutionWorkerActor(Actor[DslExecutionWorkerState, ExecutionWorkerMess
                 start=start,
                 end=end,
                 children=list(nodes),
-                metadata={"base_entity": query.span.entity_name},
+                metadata={"base_entity": query.source.entity_name},
             )
             if query.where is not None and not self._evaluator.evaluate(window_node, query.where):
                 continue
 
             return ContextWindowMatch(
-                base_entity=query.span.entity_name,
+                base_entity=query.source.entity_name,
                 nodes=list(nodes),
                 text=text,
                 start=start,
