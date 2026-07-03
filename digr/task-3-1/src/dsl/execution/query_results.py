@@ -140,12 +140,7 @@ QueryMatch = FindMatch | ContextWindowMatch | DistancePairMatch
 
 @dataclass(slots=True)
 class DslQueryExecutionResult:
-    """Единый формат результата исполнения для FIND, CONTEXT и DISTANCE.
-
-    Внутреннее устройство элемента `items` зависит от `query.kind` (узел,
-    окно или пара — это разные сущности с разным набором полей), но
-    конверт результата (`type`, `kind`, `count`, `returns`, `items`,
-    `stats`) один и тот же для всех трёх видов запроса."""
+    # конверт (type/kind/count/returns/items/stats) общий, items[i] зависит от kind
 
     query: Query
     source_path: str

@@ -129,18 +129,8 @@ Expression: TypeAlias = ComparisonExpression | FunctionExpression | NotExpressio
 
 @dataclass(slots=True)
 class Query(Serializable):
-    """Единый узел верхнего уровня для запросов FIND, CONTEXT и DISTANCE.
-
-    Поля, релевантные только части запросов, для остальных остаются
-    неиспользуемыми (см. таблицу соответствия в docs/dsl_grammar.rbnf):
-      - `target`   заполняется только для DISTANCE (правый селектор);
-      - `window`   заполняется только для CONTEXT (ограничение длины окна);
-      - `patterns` заполняется только для CONTEXT (список FOR-паттернов);
-      - `limit`    заполняется только для DISTANCE (LIMIT_PAIRS).
-    Для CONTEXT предикат `source.predicate` всегда `None`: скобки после
-    базовой сущности CONTEXT задают не логическое условие, а `window`.
-    """
-
+    # target/window/patterns/limit заполнены только для своего kind, см. rbnf.
+    # source.predicate у CONTEXT всегда None - скобки там это window, не условие.
     kind: str
     source: Selector
     target: Selector | None = None

@@ -17,10 +17,7 @@ from .document_index import DocumentIndex
 
 
 class QueryValidator:
-    """Проверяет запрос после разбора: имена сущностей и уместность полей
-    общего <хвоста запроса> (WITHIN/WHERE/LIMIT_PAIRS/RETURN) для конкретного
-    `query.kind` — грамматика их синтаксически разрешает всем трём видам
-    запроса одинаково, семантическую уместность проверяет этот класс."""
+    # грамматика разрешает поля хвоста всем kind одинаково, уместность - здесь
 
     def validate(self, query: Query, index: DocumentIndex) -> None:
         known_entities = index.entities() | {"symbol"}

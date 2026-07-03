@@ -40,14 +40,8 @@ _COMPARISON_OPERATOR_KINDS = {
 
 
 class DslTokenStreamParser:
-    """Разбор запроса по единой грамматике: <заголовок>, зависящий от
-    ключевого слова (CONTEXT/FIND/DISTANCE), и общий для всех трёх
-    <хвост запроса> = WITHIN* WHERE? LIMIT_PAIRS? RETURN?.
-
-    Семантическая уместность полей хвоста для конкретного kind (например,
-    LIMIT_PAIRS вне DISTANCE) грамматикой не ограничивается и проверяется
-    отдельно в QueryValidator — так же, как имена сущностей.
-    """
+    # заголовок зависит от ключевого слова, хвост (WITHIN* WHERE? LIMIT_PAIRS? RETURN?)
+    # общий для всех трёх - уместность полей хвоста для kind проверяет QueryValidator
 
     def __init__(self, tokens: list[DslToken]) -> None:
         self._tokens = tokens

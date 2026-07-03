@@ -18,9 +18,7 @@ from ...parsing.token_kind import TokenKind
 
 
 class DslQueryParserActor(Actor[DslQueryParserState, QueryParserMessage, QueryParserMessage]):
-    """Инкрементальный разбор запроса в два шага, общих для CONTEXT/FIND/DISTANCE:
-    сначала <заголовок>, зависящий от ключевого слова, затем общий <хвост запроса>
-    (см. DslTokenStreamParser.parse_query_head/parse_query_tail)."""
+    # два шага для всех kind: сначала заголовок, потом общий хвост
 
     def __init__(self, reply_to: ActorHandle[object] | None = None) -> None:
         super().__init__(DslQueryParserState, DslQueryParserState.READY)
