@@ -1,10 +1,5 @@
 # Задание 3.2 — синтаксические шаблоны вместо нейросети
 
-Замена шага B пайплайна `ontology_system-main` (нейросетевой классификатор типа
-связи, `relation_matcher/predict_relations.py`) на синтаксические шаблоны, ищущиеся
-через DiGr DSL. Шаг A (`build_chunks_dataset.py`, DSL `CONTEXT` по всему учебнику)
-и шаг C (`load_qdrant.py`) не менялись.
-
 - `templates.yaml` — шаблоны-фразы на 9 меток онтологии (generalization/aggregation/
   composition/association/dependency/input/output/instance/manifest), выведены из
   `reference_chunk`.
