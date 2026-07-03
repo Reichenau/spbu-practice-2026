@@ -52,10 +52,7 @@ def test_classifier_handles_empty_chunk() -> None:
 
 
 def test_input_output_are_not_distinguishable_by_template_on_identical_text() -> None:
-    # Задокументированное в отчёте наблюдение: Input и Output в этих данных
-    # различаются порядком concept_a/concept_b, а не текстом — на одном и том
-    # же тексте шаблонный классификатор не может физически дать разные ответы
-    # для двух направлений, поэтому предсказание симметрично по построению.
+    # см. отчёт: Input/Output различаются только порядком concept_a/concept_b
     clf = TemplateRelationClassifier(str(ROOT / "templates.yaml"), str(ROOT / "config" / "formats"))
     text = (
         "Арифметика, изучаемая в начальной школе, — это алгебра, включающая операции "

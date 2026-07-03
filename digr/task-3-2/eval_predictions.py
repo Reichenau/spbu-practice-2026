@@ -1,20 +1,7 @@
 #!/usr/bin/env python
-"""Метрика классификатора типа связи на реальных данных дискретки.
+"""accuracy/macro-F1 по chunks-файлу (relation_type vs predicted_relation_type).
 
-Не требует torch/transformers: берёт уже посчитанные предсказания модели
-relation_matcher/relation_model_v3 из существующего
-chunks_ontology_text_existing.jsonl (ontology_system-main) и сравнивает
-с истинным relation_type из pairs_w_relation.json (через поле relation_type
-в самом chunks-файле).
-
-Истинные метки (relation_type) — в исходном UML-регистре (Aggregation,
-Inheritance, ...), предсказанные (predicted_relation_type) — в едином
-нижнем регистре модели (aggregation, generalization, ...). Соответствие —
-таблица меток из relation_matcher/README.md; единственное несовпадающее
-имя — Inheritance -> generalization.
-
-Запуск:
-    python eval_predictions.py --chunks data/chunks_ontology_text_existing.jsonl
+python eval_predictions.py --chunks data/chunks_ontology_text_existing.jsonl
 """
 from __future__ import annotations
 
@@ -22,6 +9,7 @@ import argparse
 import json
 from collections import Counter, defaultdict
 
+# Inheritance -> generalization не опечатка, см. relation_matcher/README.md
 LABEL_MAP = {
     "Aggregation": "aggregation",
     "Association": "association",

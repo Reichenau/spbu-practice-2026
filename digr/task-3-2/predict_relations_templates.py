@@ -1,14 +1,8 @@
 #!/usr/bin/env python
-"""predict_relations_templates.py — замена relation_matcher/predict_relations.py.
+"""замена predict_relations.py, тот же CLI, но шаблоны вместо RuBERT.
 
-Тот же контракт CLI (--chunks/--out/--inplace, пишет predicted_relation_type
-рядом с истинным relation_type), но вместо RuBERT — TemplateRelationClassifier
-из relation_templates.py. Шаг A (build_chunks_dataset.py, DSL CONTEXT по всему
-документу) и шаг C (load_qdrant.py) не меняются и не запускаются отсюда.
-
-Запуск:
-    python predict_relations_templates.py --chunks data/chunks_ontology_text_reference.jsonl \
-        --out data/chunks_ontology_text_templates.jsonl --config-dir config/formats
+python predict_relations_templates.py --chunks data/chunks_ontology_text_reference.jsonl \
+    --out data/chunks_ontology_text_templates.jsonl --config-dir config/formats
 """
 from __future__ import annotations
 
