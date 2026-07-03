@@ -1,0 +1,101 @@
+"""relation_templates.py — синтаксические шаблоны вместо нейросети (задача 3.2).
+
+Заменяет relation_matcher/predict_relations.py: вместо RuBERT-классификатора
+для каждой пары (concept_a, concept_b, reference_chunk) перебираем шаблоны
+из templates.yaml в фиксированном порядке приоритета и для каждого шаблона
+спрашиваем у DiGr DSL: встречаются ли оба понятия и фраза-шаблон в одном
+контекстном окне reference_chunk. Первое совпадение даёт предсказанный тип
+связи; если ни один шаблон не сработал — по умолчанию generalization
+(самый частый класс в эталоне, см. templates.yaml).
+
+reference_chunk на вход уже дал шаг A (build_chunks_dataset.py, DSL CONTEXT
+по всему учебнику) — здесь second-pass DSL-запрос идёт по отдельному
+маленькому документу из одного этого куска, а не по всему учебнику снова,
+иначе на 372 парах и 30+ шаблонах это было бы слишком медленно.
+"""
+from __future__ import annotations
+
+import re
+import tempfile
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+from document_ast import ActorAstParser
+from dsl import ActorDslEngine
+
+from build_chunks_dataset import concept_regex
+
+# Порядок проверки шаблонов: сначала специфичные типы, generalization — последним
+# (и как явный откат по умолчанию, если вообще ничего не совпало).
+LABEL_PRIORITY = [
+    "composition",
+    "aggregation",
+    "dependency",
+    "output",
+    "input",
+    "instance",
+    "association",
+    "manifest",
+    "generalization",
+]
+
+DEFAULT_LABEL = "generalization"
+
+
+def load_templates(path: str) -> dict[str, list[str]]:
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return {label: list(phrases) for label, phrases in data.items()}
+
+
+class TemplateRelationClassifier:
+    def __init__(self, templates_path: str, config_dir: str, engine: Optional[ActorDslEngine] = None) -> None:
+        self._templates = load_templates(templates_path)
+        self._parser = ActorAstParser.from_config_dir(config_dir)
+        self._engine = engine or ActorDslEngine()
+
+    def predict(self, concept_a: str, concept_b: str, reference_chunk: str) -> str:
+        if not reference_chunk.strip():
+            return DEFAULT_LABEL
+        document = self._build_document(reference_chunk)
+        ra = concept_regex(concept_a)
+        rb = concept_regex(concept_b)
+
+        for label in LABEL_PRIORITY:
+            if label == DEFAULT_LABEL:
+                continue
+            for phrase in self._templates.get(label, ()):
+                if self._matches(document, ra, rb, phrase):
+                    return label
+
+        # generalization: либо совпал один из его собственных (слабых) шаблонов,
+        # либо ничего не совпало вообще — тогда это откат по умолчанию.
+        for phrase in self._templates.get(DEFAULT_LABEL, ()):
+            if self._matches(document, ra, rb, phrase):
+                return DEFAULT_LABEL
+        return DEFAULT_LABEL
+
+    def _matches(self, document, ra: str, rb: str, phrase: str) -> bool:
+        query = (
+            f'CONTEXT sentence[<=20] '
+            f'FOR a: /{ra}/i, b: /{rb}/i, tmpl: /{phrase}/i '
+            f'RETURN count'
+        )
+        try:
+            result = self._engine.execute(document, query).to_dict()
+        except Exception:
+            return False
+        return result["count"] > 0
+
+    def _build_document(self, text: str):
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        fd, path_str = tempfile.mkstemp(suffix=".txt")
+        path = Path(path_str)
+        try:
+            with open(fd, "w", encoding="utf-8") as f:
+                f.write(cleaned)
+            return self._parser.parse(path, format_name="txt")
+        finally:
+            path.unlink(missing_ok=True)
