@@ -1,12 +1,19 @@
 """relation_templates.py — синтаксические шаблоны вместо нейросети (задача 3.2).
 
 Заменяет relation_matcher/predict_relations.py: вместо RuBERT-классификатора
-для каждой пары (concept_a, concept_b, reference_chunk) перебираем шаблоны
-из templates.yaml в фиксированном порядке приоритета и для каждого шаблона
-спрашиваем у DiGr DSL: встречаются ли оба понятия и фраза-шаблон в одном
-контекстном окне reference_chunk. Первое совпадение даёт предсказанный тип
-связи; если ни один шаблон не сработал — по умолчанию generalization
-(самый частый класс в эталоне, см. templates.yaml).
+для каждой пары (concept_a, concept_b, reference_chunk) проверяем все шаблоны
+из templates.yaml (для каждого типа связи спрашиваем у DiGr DSL: встречаются
+ли оба понятия и фраза-шаблон в одном контекстном окне reference_chunk) и
+считаем, сколько РАЗНЫХ шаблонов сработало на каждый тип связи. Побеждает тип
+с наибольшим числом сработавших шаблонов; при равенстве — по LABEL_PRIORITY
+(более специфичные типы впереди generalization). Если не сработал ни один
+шаблон — по умолчанию generalization (самый частый класс в эталоне).
+
+Раньше (первая версия) побеждал первый сработавший шаблон в фиксированном
+порядке приоритета; голосование по числу совпадений даёт небольшой, но
+предсказуемый выигрыш там, где на один тип связи в reference_chunk
+одновременно откликаются несколько разных фраз, а на конкурирующий — только
+одна случайная (см. отчёт, раздел "Голосование по числу шаблонов").
 
 reference_chunk на вход уже дал шаг A (build_chunks_dataset.py, DSL CONTEXT
 по всему учебнику) — здесь second-pass DSL-запрос идёт по отдельному
@@ -63,19 +70,18 @@ class TemplateRelationClassifier:
         ra = concept_regex(concept_a)
         rb = concept_regex(concept_b)
 
+        votes: dict[str, int] = {}
         for label in LABEL_PRIORITY:
-            if label == DEFAULT_LABEL:
-                continue
-            for phrase in self._templates.get(label, ()):
-                if self._matches(document, ra, rb, phrase):
-                    return label
+            count = sum(
+                1 for phrase in self._templates.get(label, ())
+                if self._matches(document, ra, rb, phrase)
+            )
+            if count:
+                votes[label] = count
 
-        # generalization: либо совпал один из его собственных (слабых) шаблонов,
-        # либо ничего не совпало вообще — тогда это откат по умолчанию.
-        for phrase in self._templates.get(DEFAULT_LABEL, ()):
-            if self._matches(document, ra, rb, phrase):
-                return DEFAULT_LABEL
-        return DEFAULT_LABEL
+        if not votes:
+            return DEFAULT_LABEL
+        return max(votes, key=lambda label: (votes[label], -LABEL_PRIORITY.index(label)))
 
     def _matches(self, document, ra: str, rb: str, phrase: str) -> bool:
         query = (
