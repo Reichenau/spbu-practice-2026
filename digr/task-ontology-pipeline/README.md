@@ -39,3 +39,13 @@ python -m venv .venv
 PYTHONPATH=src PYTHONIOENCODING=utf-8 .venv/Scripts/python build_primary_ontology.py
 PYTHONPATH=src .venv/Scripts/python -m pytest -q tests/
 ```
+
+## TDL для ONTOL
+
+`build_tdl.py`: `ontology_final.json` -> `data/ontology.tdl`. Синтаксис взят из
+`ontol_v3_students-Kan_dev` (лексер/примеры): `КЛАСС`, `ОБОБЩЕНИЕ A -> B`
+(generalization), `ЗАВИСИМОСТЬ A -> B` (dependency), остальное - `АССОЦИАЦИЯ`
+с `ИМЯ "<тип>"` (явного текстового синтаксиса для ромба агрегации/композиции
+в лексере не нашёл). **Не провалидировано через их парсер** — pydantic не
+собирается под Python 3.14 в этом окружении (нет wheel), а не потому что
+не проверял вообще.
