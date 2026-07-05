@@ -1,17 +1,4 @@
 #!/usr/bin/env python
-"""odmkey -> первичная онтология через DiGr -> сравнение с дискреткой -> датасет ошибок.
-
-1. FIND definition (все \\odmkey{name}{index}) через DSL, группировка по semantic_block.
-2. Внутри каждого блока - все пары различных понятий, встретившихся вместе.
-3. Тип связи - TemplateRelationClassifier (задача 3.2).
-4. Сравнение с pairs_w_relation.json (дискретка): при конфликте побеждает дискретка.
-   Что нашёл DiGr, чего нет в дискретке - "novel". Что есть в дискретке, но DiGr
-   не нашёл - "missed". Всё вместе - data/ontology_errors.jsonl.
-5. Итоговая (исправленная) онтология - data/ontology_final.json.
-
-Запуск: python build_primary_ontology.py --tex data/all_lectures.tex \
-    --pairs data/pairs_w_relation.json --config-dir config/formats
-"""
 from __future__ import annotations
 
 import argparse
@@ -44,9 +31,6 @@ from relation_templates import TemplateRelationClassifier  # noqa: E402
 
 
 def clean_index(index: str) -> str:
-    # снимает англ. глоссы "(...)" и "!"-иерархию odmkey, чтобы совпадало
-    # с простыми именами из pairs_w_relation.json ("Область (domain)!интерпретации
-    # (of interpretation)" -> "Область интерпретации")
     index = re.sub(r"\s*\([^)]*\)", "", index)
     return index.replace("!", " ").strip()
 
@@ -65,8 +49,6 @@ def load_odmkeys(engine: ActorDslEngine, document) -> list[ConceptOccurrence]:
 
 
 def pairs_within_blocks(odmkeys: list[ConceptOccurrence], block_index: BlockIndex, window_blocks: int = 2) -> set[tuple[str, str]]:
-    # то же окно в 2 соседних semantic_block, что и build_chunks_dataset.py,
-    # а не только один блок - иначе почти нет пересечения с дискреткой.
     by_block: dict[int, list[ConceptOccurrence]] = {}
     for occ in odmkeys:
         block = block_index.index_of(occ.start)
@@ -85,7 +67,6 @@ def pairs_within_blocks(odmkeys: list[ConceptOccurrence], block_index: BlockInde
     return candidates
 
 
-# см. relation_matcher/README.md - Inheritance -> generalization не опечатка
 LABEL_MAP = {
     "aggregation": "aggregation", "association": "association", "composition": "composition",
     "dependency": "dependency", "inheritance": "generalization", "input": "input",
@@ -115,9 +96,6 @@ def build_reference_chunk(full_text: str, index_a: str, index_b: str, odmkeys: l
 
 
 def chunk_by_text_search(engine, document, full_text: str, block_index: BlockIndex, name_a: str, name_b: str) -> str | None:
-    # тот же поиск, что и build_chunks_dataset.py: по словоформам в тексте,
-    # а не по позиции odmkey - odmkey ставится один раз, а слово в тексте
-    # встречается многократно, поэтому так находится намного больше пар.
     candidates = find_candidates_text(engine, document, full_text, block_index, name_a, name_b, window_blocks=2)
     if not candidates:
         return None
@@ -162,8 +140,6 @@ def main(argv: list[str] | None = None) -> int:
     final: list[dict] = []
     covered_names: set[frozenset[str]] = set()
 
-    # шаг 1: известные пары дискретки - проверенный текстовый поиск (даёт ~372/414,
-    # а не ~24 как поиск по позиции odmkey, см. README)
     for (name1, name2), gt_type in ground_truth.items():
         chunk = chunk_by_text_search(engine, document, full_text, block_index, name1, name2)
         covered_names.add(frozenset({name1, name2}))
@@ -178,8 +154,6 @@ def main(argv: list[str] | None = None) -> int:
             errors.append(record)
         final.append({"name1": name1, "name2": name2, "type": gt_type})
 
-    # шаг 2: новые пары вне дискретки - по совместной встречаемости odmkey
-    # (полный текстовый перебор всех ~1465 понятий тут не потянуть, см. README)
     candidates = pairs_within_blocks(odmkeys, block_index)
     candidates = {(a, b) for a, b in candidates if frozenset({a, b}) not in covered_names}
     print(f"  новых кандидатных пар (odmkey, вне дискретки): {len(candidates)}")

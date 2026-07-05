@@ -1,10 +1,3 @@
-"""замена predict_relations.py: шаблоны из templates.yaml вместо RuBERT.
-
-считаем для каждого типа связи, сколько его шаблонов совпало в reference_chunk
-(DSL CONTEXT с обоими понятиями + фразой), берём тип с максимумом голосов,
-дефолт generalization. документ строим из одного reference_chunk, не из всей
-книги заново - иначе слишком долго на 372 парах.
-"""
 from __future__ import annotations
 
 import re
@@ -19,7 +12,6 @@ from dsl import ActorDslEngine
 
 from build_chunks_dataset import concept_regex
 
-# порядок для тайбрейка при равном числе голосов
 LABEL_PRIORITY = [
     "composition",
     "aggregation",
