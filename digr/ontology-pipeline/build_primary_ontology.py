@@ -8,9 +8,10 @@ import sys
 from itertools import combinations
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parent.parent / "engine" / "src"
-if _SRC.is_dir() and str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+_ROOT = Path(__file__).resolve().parent.parent
+for _p in (_ROOT / "engine" / "src", _ROOT / "relation-classifier"):
+    if _p.is_dir() and str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from dsl import ActorDslEngine  # noqa: E402
 
@@ -113,10 +114,10 @@ def chunk_by_text_search(engine, document, full_text: str, block_index: BlockInd
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Первичная онтология из odmkey через DiGr")
-    parser.add_argument("--tex", default="data/all_lectures.tex")
-    parser.add_argument("--pairs", default="data/pairs_w_relation.json")
+    parser.add_argument("--tex", default="../data/all_lectures.tex")
+    parser.add_argument("--pairs", default="../data/pairs_w_relation.json")
     parser.add_argument("--config-dir", default="config/formats")
-    parser.add_argument("--templates", default="templates.yaml")
+    parser.add_argument("--templates", default="../relation-classifier/templates.yaml")
     parser.add_argument("--errors-out", default="data/ontology_errors.jsonl")
     parser.add_argument("--final-out", default="data/ontology_final.json")
     args = parser.parse_args(argv)

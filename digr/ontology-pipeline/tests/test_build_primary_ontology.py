@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT.parent / "engine" / "src"))
+sys.path.insert(0, str(ROOT.parent / "relation-classifier"))
 
 from build_chunks_dataset import ConceptOccurrence  # noqa: E402
 from build_primary_ontology import BlockIndex, clean_index, pairs_within_blocks  # noqa: E402

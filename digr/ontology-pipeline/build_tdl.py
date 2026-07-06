@@ -4,11 +4,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
-from build_chunks_dataset import concept_regex, load_document
-from build_primary_ontology import LABEL_MAP, load_odmkeys
-from dsl import ActorDslEngine
+_ROOT = Path(__file__).resolve().parent.parent
+for _p in (_ROOT / "engine" / "src", _ROOT / "relation-classifier"):
+    if _p.is_dir() and str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+from build_chunks_dataset import concept_regex, load_document  # noqa: E402
+from build_primary_ontology import LABEL_MAP, load_odmkeys  # noqa: E402
+from dsl import ActorDslEngine  # noqa: E402
 
 SECTION_TITLE_RE = re.compile(r"\\section\{([^}]*)\}")
 
@@ -113,7 +119,7 @@ def build_section_tdl(title: str, pairs: list[tuple[str, str, str]]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tex", default="data/all_lectures.tex")
+    parser.add_argument("--tex", default="../data/all_lectures.tex")
     parser.add_argument("--config-dir", default="config/formats")
     parser.add_argument("--final", default="data/ontology_final.json")
     parser.add_argument("--out-dir", default="data/tdl")

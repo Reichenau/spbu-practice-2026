@@ -1,4 +1,8 @@
-# Задание 3.2 — синтаксические шаблоны вместо нейросети
+# Синтаксические шаблоны для классификации связей
+
+Замена нейросетевой (RuBERT) классификации отношений между понятиями на
+сопоставление с текстовыми шаблонами через DSL-запрос. Отчёт —
+[`../docs/relation_classifier_report.pdf`](../docs/relation_classifier_report.pdf).
 
 - `templates.yaml` — шаблоны-фразы на 9 меток онтологии (generalization/aggregation/
   composition/association/dependency/input/output/instance/manifest), выведены из
@@ -7,11 +11,11 @@
   DSL-запрос `CONTEXT ... FOR concept_a, concept_b, template RETURN count`.
 - `predict_relations_templates.py` — замена `predict_relations.py`, тот же CLI-контракт.
 - `build_chunks_dataset.py` — копия шага A (не изменена), запускается на общем движке
-  из [`../engine`](../engine) (тот же, что вышел из задачи 3.1), чтобы проверить, что
-  объединённый движок не ломает этот реальный пайплайн.
-- `relation_templates_report.pdf` — отчёт.
-- `data/` — данные дискретки (`all_lectures.tex`, `pairs_w_relation.json`), эталонные
-  и предсказанные куски (`chunks_ontology_text_*.jsonl`), результаты оценки.
+  из [`../engine`](../engine), чтобы проверить, что объединённый движок не ломает этот
+  реальный пайплайн. Корпус дискретки — общий, лежит в [`../data`](../data)
+  (`--tex ../data/all_lectures.tex --pairs ../data/pairs_w_relation.json`).
+- `data/` — эталонные и предсказанные куски (`chunks_ontology_text_*.jsonl`),
+  результаты оценки; здесь же используется корпус из `../data`.
 - `tests/` — тесты `TemplateRelationClassifier`.
 
 ## Итог эксперимента
