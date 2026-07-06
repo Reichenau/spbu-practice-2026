@@ -8,10 +8,10 @@ import sys
 
 def test_cli_noninteractive_smoke_outputs_ast_json(repo_root) -> None:
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo_root / "src")
+    env["PYTHONPATH"] = str(repo_root.parent / "engine" / "src")
 
     completed = subprocess.run(
-        [sys.executable, "src/main.py", "text.txt", "--format", "txt"],
+        [sys.executable, "main.py", "text.txt", "--format", "txt"],
         cwd=repo_root,
         env=env,
         capture_output=True,

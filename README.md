@@ -5,6 +5,8 @@
 
 - [`digr/task-1`](digr/task-1) — формальная грамматика DSL в РБНФ.
 - [`digr/task-2`](digr/task-2) — описание архитектуры DiGr DSL.
+- [`digr/engine`](digr/engine) — общий код DSL/AST/акторного рантайма, вышедший
+  из задачи 3.1, используют task-3-1, task-3-2 и task-ontology-pipeline.
 - [`digr/task-3-1`](digr/task-3-1) — объединение FIND/CONTEXT/DISTANCE в один тип
   запроса и единый AST.
 - [`digr/task-3-2`](digr/task-3-2) — замена нейросетевой классификации связей на
