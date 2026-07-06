@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--templates", default="../relation-classifier/templates.yaml")
     parser.add_argument("--errors-out", default="data/ontology_errors.jsonl")
     parser.add_argument("--final-out", default="data/ontology_final.json")
+    parser.add_argument("--chunks-out", default="data/ontology_chunks.jsonl")
     args = parser.parse_args(argv)
 
     document = load_document(args.tex, args.config_dir)
@@ -139,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
 
     errors: list[dict] = []
     final: list[dict] = []
+    chunks: list[dict] = []
     covered_names: set[frozenset[str]] = set()
 
     for (name1, name2), gt_type in ground_truth.items():
@@ -153,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
         if predicted.lower() != LABEL_MAP.get(gt_type.lower(), gt_type.lower()):
             record["status"] = "mismatch"
             errors.append(record)
+        else:
+            record["status"] = "matched"
+        chunks.append(record)
         final.append({"name1": name1, "name2": name2, "type": gt_type})
 
     candidates = pairs_within_blocks(odmkeys, block_index)
@@ -164,14 +169,19 @@ def main(argv: list[str] | None = None) -> int:
         if not chunk:
             continue
         predicted = classifier.predict(to_plain_word(index_a), to_plain_word(index_b), chunk)
-        errors.append({"index_a": index_a, "index_b": index_b, "predicted_relation_type": predicted,
-                        "reference_chunk": chunk, "status": "novel"})
+        record = {"index_a": index_a, "index_b": index_b, "predicted_relation_type": predicted,
+                   "reference_chunk": chunk, "status": "novel"}
+        errors.append(record)
+        chunks.append(record)
         final.append({"name1": index_a, "name2": index_b, "type": predicted})
 
     Path(args.errors_out).write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in errors) + "\n", encoding="utf-8",
     )
     Path(args.final_out).write_text(json.dumps(final, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path(args.chunks_out).write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in chunks) + "\n", encoding="utf-8",
+    )
 
     n_mismatch = sum(1 for r in errors if r.get("status") == "mismatch")
     n_novel = sum(1 for r in errors if r.get("status") == "novel")
