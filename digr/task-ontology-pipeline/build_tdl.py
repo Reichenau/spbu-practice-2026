@@ -12,6 +12,16 @@ from dsl import ActorDslEngine
 
 SECTION_TITLE_RE = re.compile(r"\\section\{([^}]*)\}")
 
+RESERVED_WORDS = {
+    "класс", "интерфейс", "тип_данных", "шаблон", "параметры", "подстановка",
+    "класс_ассоциации", "перечисление", "конец", "абстрактный", "атрибуты",
+    "операции", "обобщение", "ассоциация", "композиция", "агрегация",
+    "зависимость", "реализация", "размещение", "выровнять", "распределить",
+    "сгруппировать", "привязать", "зафиксировать", "повернуть", "по",
+    "левому", "правому", "верху", "низу", "горизонтали", "вертикали", "шаг",
+    "как", "левее", "правее", "выше", "ниже", "в",
+}
+
 
 def load_sections(engine: ActorDslEngine, document) -> list[tuple[str, int, int]]:
     result = engine.execute(document, "FIND section RETURN nodes").to_dict()
@@ -52,6 +62,8 @@ def slugify(name: str) -> str:
     slug = "".join(w[:1].upper() + w[1:] for w in words) or "X"
     if slug[0].isdigit():
         slug = "N" + slug
+    if slug.lower() in RESERVED_WORDS:
+        slug += "_"
     return slug
 
 
