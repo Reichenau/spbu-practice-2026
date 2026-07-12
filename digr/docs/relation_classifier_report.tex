@@ -1,0 +1,273 @@
+\documentclass[a4paper,12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage[left=25mm, right=15mm, top=20mm, bottom=20mm]{geometry}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{indentfirst}
+\usepackage{microtype}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{seqsplit}
+
+\setlength{\parindent}{1.25cm}
+\renewcommand{\arraystretch}{1.4}
+\setlength{\emergencystretch}{3em}
+
+\newcommand{\code}[1]{\texttt{\seqsplit{#1}}}
+
+\lstdefinelanguage{DiGrDSL}{
+  keywords={FIND,CONTEXT,DISTANCE,FOR,TO,WITHIN,WHERE,RETURN,LIMIT_PAIRS,AND,OR,NOT,TRUE,FALSE,NULL},
+  sensitive=true,
+  morestring=[b]",
+  morecomment=[l]{//},
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries,
+  frame=single,
+  breaklines=true,
+  inputencoding=utf8,
+  extendedchars=true,
+  literate={а}{{\cyra}}1 {б}{{\cyrb}}1 {в}{{\cyrv}}1 {г}{{\cyrg}}1
+           {д}{{\cyrd}}1 {е}{{\cyre}}1 {ё}{{\cyryo}}1 {ж}{{\cyrzh}}1
+           {з}{{\cyrz}}1 {и}{{\cyri}}1 {й}{{\cyrshti}}1 {к}{{\cyrk}}1
+           {л}{{\cyrl}}1 {м}{{\cyrm}}1 {н}{{\cyrn}}1 {о}{{\cyro}}1
+           {п}{{\cyrp}}1 {р}{{\cyrr}}1 {с}{{\cyrs}}1 {т}{{\cyrt}}1
+           {у}{{\cyru}}1 {ф}{{\cyrf}}1 {х}{{\cyrh}}1 {ц}{{\cyrc}}1
+           {ч}{{\cyrch}}1 {ш}{{\cyrsh}}1 {щ}{{\cyrshch}}1 {ъ}{{\cyrhrdsn}}1
+           {ы}{{\cyrery}}1 {ь}{{\cyrsftsn}}1 {э}{{\cyrerev}}1 {ю}{{\cyryu}}1
+           {я}{{\cyrya}}1
+}
+
+\begin{document}
+
+\section{Отчёт по задаче 3.2: синтаксические шаблоны вместо нейросети}
+
+\subsection{Постановка задачи}
+
+В пайплайне \code{ontology_system-main} тип связи между парой понятий определяет
+дообученный RuBERT-классификатор (\code{relation\_matcher/predict\_relations.py},
+9 классов). Задача — заменить это на синтаксические шаблоны: несколько
+фраз-паттернов на тип связи, которые ищутся вместе с обоими понятиями в одном
+контекстном окне через DiGr DSL. Пайплайн вокруг не меняется: шаг A
+(\code{build\_chunks\_dataset.py}, DSL \texttt{CONTEXT} по всему учебнику находит
+эталонный кусок текста на пару понятий) и шаг C (\code{load\_qdrant.py}, загрузка
+в Qdrant) остаются как есть; заменяется только шаг B.
+
+\subsection{Перед началом: честная метрика нейросети}
+
+\code{relation\_matcher/README.md} заявляет «честное» качество модели v3 —
+$\approx$0.58 accuracy / 0.41 macro-F1, полученное будто бы через
+\code{eval\_holdout.py} (2-fold group CV по парам, без утечки train/val по
+окнам). При проверке фактический файл \code{relation\_matcher/holdout\_metrics.json}
+(буквальный вывод этого скрипта) содержит другие числа:
+
+\begin{lstlisting}[language={},basicstyle=\ttfamily\small]
+{
+  "per_pair_accuracy": 0.302,
+  "per_pair_macro_f1": 0.250
+}
+\end{lstlisting}
+
+То есть README и committed JSON-файл с метриками расходятся; я взял за основу
+файл метрик, а не прозу README, поскольку это прямой вывод скрипта, а не
+пересказ. По этой цифре классификатор порог 50\% из ТЗ не проходит — это и
+стало основанием переходить к задаче 3.2 (см. отдельную переписку, ветка
+эксперимента \code{Задание\_3\_2}).
+
+\subsection{Откуда взяты шаблоны}
+
+Шаблоны не придуманы заранее, а выведены из реальных \code{reference\_chunk}
+(\code{chunks\_ontology\_text\_reference.jsonl}, 372 пары с эталонным типом связи),
+сгруппированных по типу связи. При разборе обнаружилась проблема, которая
+определила результат всего эксперимента.
+
+\paragraph{Input и Output неразличимы по тексту.} Одна и та же пара может
+встречаться в эталоне с обоими типами связи, с идентичным \code{reference\_chunk},
+только с переставленными местами \code{concept\_a}/\code{concept\_b}. Пример —
+пара «деление с остатком» / «натуральное число» на тексте
+\emph{«Арифметика... включающая операции сложения, умножения, вычитания и деления
+с остатком, причём носителем является множество натуральных чисел и ноль»}:
+в одной записи это \texttt{Output}, в другой (с переставленными понятиями) —
+\texttt{Input}. Само по себе это ожидаемо: вход и выход операции — это роль
+понятия в паре, а не свойство текста. Но отсюда следует, что никакой
+синтаксический шаблон в принципе не может различить эти два класса на таком тексте
+— шаблон видит только текст, а не то, какое понятие подставлено в
+\code{concept\_a}, а какое в \code{concept\_b}. Это задокументировано тестом
+\code{test\_input\_output\_are\_not\_distinguishable\_by\_template\_on\_identical\_text}.
+
+\paragraph{Association и Instance почти не имеют собственных маркеров.} В
+просмотренных примерах оба типа вводятся тем же оборотом «X называется/является Y»,
+что и \texttt{generalization} (самый частый класс, 188/372) — специфичных фраз,
+которые встречались бы заметно чаще именно в этих классах, найти не удалось.
+
+\paragraph{Composition, aggregation, dependency, generalization — сигнал есть.}
+Composition тяготеет к «состоит из», «фактормножество... относительно»,
+«является подмножеством»; aggregation — к «замкнуто относительно», «подмножество
+... называется»; generalization — к «частный случай», «является видом».
+Итоговые шаблоны — \code{templates.yaml}.
+
+\subsection{Механизм сопоставления}
+
+\code{relation\_templates.py}, класс \texttt{TemplateRelationClassifier}. Для
+пары (\code{concept\_a}, \code{concept\_b}, \code{reference\_chunk}) строится
+отдельный маленький \texttt{AstDocument} из одного этого куска (не из всего
+учебника заново — иначе на 372 парах и $\sim$35 шаблонах это было бы слишком
+медленно), и для каждого типа связи выполняется DSL-запрос на каждый его шаблон:
+
+\begin{lstlisting}[language=DiGrDSL]
+CONTEXT sentence[<=20]
+FOR a: /regex_concept_a/i, b: /regex_concept_b/i, tmpl: /regex_phrase/i
+RETURN count
+\end{lstlisting}
+
+Побеждает тип связи, у которого сработало больше всего \emph{разных} шаблонов
+(при равенстве — по \texttt{LABEL\_PRIORITY}, специфичные типы впереди
+\texttt{generalization}); если не сработал ни один — откат на
+\texttt{generalization} (самый частый класс). Голосование по числу
+сработавших шаблонов, а не первый совпавший по приоритету — так изначально не
+делали (раздел «Голосование по числу шаблонов» ниже). Регэкспы понятий
+строятся той же функцией \code{concept\_regex}, что и в
+\code{build\_chunks\_dataset.py} (стем самого длинного значимого слова
+понятия), чтобы учитывать словоформы.
+
+\code{predict\_relations\_templates.py} воспроизводит контракт CLI
+\code{predict\_relations.py}: \code{--chunks}/\code{--out}/\code{--inplace},
+пишет \code{predicted\_relation\_type}, не трогает истинный \code{relation\_type}.
+
+\subsection{Голосование по числу шаблонов}
+
+Первая версия брала первый сработавший шаблон в порядке приоритета типов.
+Заменил на голосование: считаем для каждого типа число разных сработавших
+шаблонов, берём тип с максимумом. Заодно добавил ещё несколько шаблонов для
+\texttt{composition}/\texttt{aggregation}/\texttt{dependency}, выведенных из
+полного (а не первых 12) списка примеров каждого класса — «модулем над»,
+«строится как» (composition), «делится на», «часть массива/отрезка»
+(aggregation), «определяется тем», отрицательный lookbehind
+\code{(?<!не )зависит от} — чтобы «не зависит от» (обратное утверждение) не
+засчитывалось как \texttt{dependency}.
+
+Эффект: accuracy 0.446 $\to$ 0.454, macro-F1 0.124 $\to$ 0.136. Небольшой,
+но реальный выигрыш. Внутри — неоднородно: recall \texttt{composition}
+вырос до 1.0 (находит все 6 примеров), но ценой точности (0.158 $\to$ много
+ложных срабатываний — расширенные шаблоны стали слишком широкими и цепляют
+не только composition); \texttt{dependency}, наоборот, просел (recall
+0.079 $\to$ 0.026) — новые шаблоны конкурируют за голоса с уже
+существующими generalization-шаблонами на тех же парах.
+
+\paragraph{Проверенная, но не применённая идея: порядок слов для Input/Output.}
+Гипотеза: если \code{concept\_a} встречается в \code{reference\_chunk} раньше
+\code{concept\_b}, это коррелирует с направлением связи. Проверка на всех 88
+парах \texttt{Input}/\texttt{Output} подтвердила сигнал: правило «\code{a} раньше
+\code{b} $\Rightarrow$ \texttt{Input}» верно в 66/88 = 75\% случаев (при 50\%
+случайности). Но это не стало частью классификатора: если применить это
+правило вместо отката на \texttt{generalization} по всем 372 парам, а не
+только там, где истинный класс действительно \texttt{Input}/\texttt{Output},
+эффект отрицательный — +66 верных там, где \texttt{generalization} была
+неверна, но $-$188 там, где \texttt{generalization} была верна и её
+перекрыло угадывание направления. Проблема не в самом правиле, а в отсутствии
+текстового признака, \emph{когда} его вообще стоит применять вместо
+\texttt{generalization}. Оставляю как задокументированную, но не решённую
+задачу для дальнейшей работы, а не встраиваю вслепую.
+
+\subsection{Результаты эксперимента}
+
+Все варианты прогнаны на одних и тех же 372 парах из \code{chunks\_ontology\_text\_reference.jsonl}
+(эталонный \code{relation\_type} из \code{pairs\_w\_relation.json}, учебник —
+\code{data/all\_lectures.tex}).
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+\textbf{Подход} & \textbf{Accuracy} & \textbf{Macro-F1} \\
+\midrule
+Нейросеть, честная оценка (\code{holdout\_metrics.json}) & 0.302 & 0.250 \\
+Всегда \texttt{generalization} (majority-class baseline) & 0.505 & $\approx$0.075 \\
+Синтаксические шаблоны, первая версия (приоритет) & 0.446 & 0.124 \\
+Синтаксические шаблоны, голосование + расширенные фразы & 0.454 & 0.136 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Полная разбивка по классам — \code{data/eval\_templates\_result.txt}. Шаблоны
+дают accuracy выше честной нейросети (0.454 против 0.302), но ниже порога
+0.5 из ТЗ. По macro-F1 шаблоны хуже нейросети (0.136 против 0.250) — там, где у
+шаблонов вообще есть сигнал (\texttt{aggregation}, \texttt{composition},
+\texttt{generalization}), нейросеть тоже неплохо работает, а на
+\texttt{input}/\texttt{output}/\texttt{association}/\texttt{instance}/\texttt{manifest}
+шаблоны почти не дают верных предсказаний (recall 0--0.13 у всех, кроме
+composition), тогда как нейросеть даже на честной оценке распределяет ошибки
+более равномерно.
+
+Majority-class baseline формально проходит порог accuracy > 50\% из ТЗ, но это
+не классификатор в содержательном смысле — предсказывает один класс всегда,
+macro-F1 около нуля. Это показывает, что сама по себе метрика accuracy на
+таком дисбалансе классов (188/372 — один класс) слабо о чём-то говорит без
+macro-F1 рядом.
+
+\subsection{Вывод}
+
+Синтаксические шаблоны в том виде, как их описывает ТЗ (несколько фраз на тип
+связи), на этом корпусе не решают задачу лучше нейросети и порог 50\% accuracy
+не проходят. Причина не в качестве конкретных шаблонов, а структурная: половина
+типов связи в этой онтологии (\texttt{input}/\texttt{output}) различается ролью
+понятия в паре, а не текстом, и ещё два (\texttt{association}, \texttt{instance})
+не имеют устойчивых лексических маркеров в этом учебнике — оба вывода
+подкреплены прямыми примерами из данных (раздел «Откуда взяты шаблоны»), а не
+только итоговой цифрой.
+
+Реализация тем не менее рабочая и подключаемая: тот же CLI-контракт, что и у
+\code{predict\_relations.py}, прозрачные (в отличие от нейросети) правила
+предсказания, полезна как минимум для \texttt{composition}/\texttt{aggregation}/\texttt{generalization},
+где сигнал есть. Дальнейшее улучшение в рамках чисто синтаксического подхода
+для \texttt{input}/\texttt{output} невозможно в принципе (см. пример с
+переставленными понятиями) — нужна либо асимметричная разметка роли понятия
+в шаблоне (кто на входе, кто на выходе, а не просто «оба встретились рядом»),
+либо возврат к обучаемой модели для этих конкретных классов.
+
+\subsection{Загрузка в Qdrant}
+
+Шаг C (\code{load\_qdrant.py}) не менялся — взят как есть из
+\code{ontology\_system-main}, только запущен на \code{chunks\_ontology\_text\_templates.jsonl}
+(эталонный кусок + истинный \code{relation\_type} + \code{predicted\_relation\_type}
+от шаблонов). Модель эмбеддингов — \code{intfloat/multilingual-e5-base}
+(768 измерений, косинусная мера), это дефолт самого \code{load\_qdrant.py},
+не облегчённая замена: \code{-large-instruct} используется по умолчанию только в
+\code{build\_chunks\_dataset.py} для его собственного (необязательного)
+режима эмбеддинга, а не здесь.
+
+\begin{lstlisting}[language={},basicstyle=\ttfamily\small]
+Загружено точек: 367 в коллекцию 'concept_pairs_templates' (dim=768, cosine).
+\end{lstlisting}
+
+367, а не 372 — часть точек совпала по идентификатору (\code{point\_id}
+детерминирован по паре понятий и типу связи, см. \code{load\_qdrant.py}) и
+перезаписалась при upsert; это ожидаемое поведение самого шага C, не
+специфичное для шаблонов. Демо-поиск по коллекции (\code{data/load\_qdrant\_log.txt})
+возвращает содержательно близкие пары — векторный поиск по эмбеддингам
+работает независимо от того, каким способом (шаблоны или нейросеть)
+проставлен \code{predicted\_relation\_type}.
+
+\subsection{Проверка работоспособности}
+
+\code{tests/test\_relation\_templates.py} — 6 тестов: загрузка всех 9 меток
+из \code{templates.yaml}, корректное срабатывание шаблонов на реальных
+примерах \texttt{aggregation}/\texttt{composition}, откат на
+\texttt{generalization}, пустой \code{reference\_chunk}, и тест,
+явно фиксирующий находку про \texttt{Input}/\texttt{Output}. Все 6 проходят
+(\code{PYTHONPATH=src pytest -q tests/}).
+
+Дополнительно: \code{build\_chunks\_dataset.py} с движком из задачи 3.1
+(\code{src/dsl}, объединённые \texttt{FIND}/\texttt{CONTEXT}/\texttt{DISTANCE})
+находит те же 372 из 414 пар, что и оригинальный движок
+(\code{ontology\_system-main/README.md}: «372/414 пар») — единый движок из 3.1
+не сломал этот реальный внешний пайплайн.
+
+\end{document}
